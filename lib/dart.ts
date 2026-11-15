@@ -13,7 +13,7 @@ export class DartError extends Error {
 }
 
 function key(): string {
-  const k = process.env.DART_API_KEY;
+  const k = (process.env.DART_API_KEY ?? '').trim().replace(/^["']|["']$/g, '');
   if (!k) throw new DartError('서버에 DART_API_KEY가 설정되지 않았어요.', 500);
   return k;
 }
@@ -53,7 +53,10 @@ async function listJson(params: Record<string, string>): Promise<{ items: ListIt
   if (!res.ok) throw new DartError(`DART 응답 오류 (${res.status})`);
   const j = (await res.json()) as { status: string; message: string; list?: ListItem[]; total_page?: number };
   if (j.status === '013') return { items: [], totalPage: 0 };
-  if (j.status !== '000') throw new DartError(DART_STATUS[j.status] ?? `DART 오류: ${j.message}`);
+  if (j.status !== '000') {
+    console.error('dart list error', j.status, j.message, Object.keys(params));
+    throw new DartError(`${DART_STATUS[j.status] ?? 'DART 오류'} (DART ${j.status}: ${j.message})`);
+  }
   return { items: j.list ?? [], totalPage: j.total_page ?? 1 };
 }
 
@@ -78,7 +81,13 @@ export async function corpList(): Promise<Corp[]> {
   const res = await fetch(`${BASE}/corpCode.xml?crtfc_key=${key()}`, { cache: 'no-store' });
   if (!res.ok) throw new DartError(`DART 회사 목록 응답 오류 (${res.status})`);
   const buf = new Uint8Array(await res.arrayBuffer());
-  if (buf[0] !== 0x50 || buf[1] !== 0x4b) throw new DartError('DART 회사 목록을 받지 못했어요. 인증키를 확인해 주세요.');
+  if (buf[0] !== 0x50 || buf[1] !== 0x4b) {
+    const text = new TextDecoder('utf-8').decode(buf.slice(0, 400));
+    const code = text.match(/<status>(\d+)<\/status>/)?.[1] ?? text.match(/"status"\s*:\s*"(\d+)"/)?.[1];
+    const msg = text.match(/<message>([^<]*)<\/message>/)?.[1] ?? text.match(/"message"\s*:\s*"([^"]*)"/)?.[1];
+    console.error('dart corpCode error', code, msg);
+    throw new DartError(`DART 회사 목록을 받지 못했어요${code ? ` (DART ${code}: ${msg ?? DART_STATUS[code] ?? ''})` : ''}.`);
+  }
   const files = unzipSync(buf);
   const xml = new TextDecoder('utf-8').decode(Object.values(files)[0]);
   const list: Corp[] = [];

@@ -15,7 +15,7 @@ interface Msg {
 }
 
 async function call(body: Record<string, unknown>): Promise<string> {
-  const k = process.env.OPENAI_API_KEY;
+  const k = (process.env.OPENAI_API_KEY ?? '').trim().replace(/^["']|["']$/g, '');
   if (!k) throw new LlmError('서버에 OPENAI_API_KEY가 설정되지 않았어요.', 500);
   const m = model();
   const payload: Record<string, unknown> = { model: m, ...body };
