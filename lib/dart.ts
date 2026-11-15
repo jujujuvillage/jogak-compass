@@ -114,7 +114,7 @@ export async function searchCorps(q: string, limit = 8): Promise<Corp[]> {
 export const KNOWN_ISSUERS = ['열매컴퍼니', '투게더아트', '서울옥션블루', '스탁키퍼', '테사'];
 
 const IC_RE = /투자계약/;
-const OFFERING_RE = /증권신고서|투자설명서|증권발행실적/;
+const OFFERING_RE = /증권신고서|투자설명서/;
 
 async function filingsForCorp(corpCode: string, bgnDe = '20230101'): Promise<Filing[]> {
   const out: Filing[] = [];
@@ -152,7 +152,7 @@ function dedupeSort(list: Filing[]): Filing[] {
 }
 
 export async function investmentContractFilings(): Promise<Filing[]> {
-  const cacheKey = 'filings:ic:v2';
+  const cacheKey = 'filings:ic:v3';
   const cached = await cacheGet<Filing[]>(cacheKey);
   if (cached) return cached;
   const started = Date.now();
