@@ -222,3 +222,16 @@ describe('api/analyze + api/chat (mocked upstream)', () => {
     expect(res.status).toBe(400);
   });
 });
+
+import { sampleAnswer } from '@/lib/sampleAnswers';
+describe('sample answers (preset questions, no AI)', () => {
+  it('상품 선택 시 상품 정보로 답변', () => {
+    expect(sampleAnswer('투자금은 언제 돌려받아요?', art)).toContain('푸른 정원 01');
+    expect(sampleAnswer('수수료는 어떤 게 있어요?', art)).toContain('성과보수 이익의 20%');
+    expect(sampleAnswer('중간에 팔 수 있어요?', art)).toContain('중간에 팔기 어려운');
+    expect(sampleAnswer('가장 큰 위험이 뭐예요?', bld)).toContain('공실');
+  });
+  it('상품 미선택 시 일반 답변', () => {
+    expect(sampleAnswer('수수료는 어떤 게 있어요?', null)).toContain('총비용');
+  });
+});

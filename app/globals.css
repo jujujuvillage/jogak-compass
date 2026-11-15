@@ -231,3 +231,5 @@ header.top { position: sticky; top: 0; z-index: 5; height: 60px; display: flex; 
 .toast { position: fixed; bottom: 100px; left: 50%; transform: translateX(-50%); background: #263c2f; color: #fff; padding: 11px 18px; border-radius: 9px; z-index: 20; font-size: 12px; max-width: 90vw; }
 .footer { margin-top: 30px; padding-top: 18px; border-top: 1px solid var(--line); font-size: 10.5px; color: #a3afa6; line-height: 1.75; }
 .footer a { color: #8aa192; }
+
+.sample-tag { display: block; width: fit-content; font-size: 10px; font-weight: 700; color: #8c8a69; background: #f6f3e2; border-radius: 5px; padding: 2px 7px; margin-bottom: 6px; }

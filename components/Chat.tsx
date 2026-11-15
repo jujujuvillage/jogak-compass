@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ChatMessage, Product } from '@/lib/types';
 import { api } from '@/lib/client';
+import { PRESET_QUESTIONS, sampleAnswer } from '@/lib/sampleAnswers';
 
 interface Props {
   open: boolean;
@@ -13,10 +14,9 @@ interface Props {
   clearPending: () => void;
 }
 
-const CHIPS = ['투자금은 언제 돌려받아요?', '수수료는 어떤 게 있어요?', '가장 큰 위험이 뭐예요?', '중간에 팔 수 있어요?'];
 
 export default function Chat({ open, onClose, products, contextId, setContextId, pending, clearPending }: Props) {
-  const [msgs, setMsgs] = useState<(ChatMessage & { err?: boolean })[]>([]);
+  const [msgs, setMsgs] = useState<(ChatMessage & { err?: boolean; sample?: boolean })[]>([]);
   const [text, setText] = useState('');
   const [busy, setBusy] = useState(false);
   const box = useRef<HTMLDivElement>(null);
@@ -26,10 +26,22 @@ export default function Chat({ open, onClose, products, contextId, setContextId,
     box.current?.scrollTo({ top: box.current.scrollHeight, behavior: 'smooth' });
   }, [msgs, busy]);
 
+  /** 미리 정해진 질문: AI를 부르지 않고 샘플 답변을 보여준다. */
+  const sendPreset = (q: string) => {
+    if (busy) return;
+    setMsgs((m) => [...m, { role: 'user', content: q }]);
+    setBusy(true);
+    window.setTimeout(() => {
+      setMsgs((m) => [...m, { role: 'assistant', content: sampleAnswer(q, product), sample: true }]);
+      setBusy(false);
+    }, 500);
+  };
+
+  /** 직접 입력한 질문: 서버(OpenAI)로 보낸다. */
   const send = async (q: string) => {
     const question = q.trim();
     if (!question || busy) return;
-    const history = msgs.filter((m) => !m.err).map(({ role, content }) => ({ role, content }));
+    const history = msgs.filter((m) => !m.err && !m.sample).map(({ role, content }) => ({ role, content }));
     setMsgs((m) => [...m, { role: 'user', content: question }]);
     setText('');
     setBusy(true);
@@ -45,7 +57,7 @@ export default function Chat({ open, onClose, products, contextId, setContextId,
 
   useEffect(() => {
     if (pending && open) {
-      send(pending);
+      sendPreset(pending);
       clearPending();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -76,17 +88,9 @@ export default function Chat({ open, onClose, products, contextId, setContextId,
         <div className="bubble">
           안녕하세요! {product ? `"${product.name}"` : '조각투자 상품'}의 수익 구조, 돌려받는 방법, 수수료, 위험에 대해 물어보세요. 🌿
         </div>
-        {msgs.length === 0 && (
-          <div className="chips">
-            {CHIPS.map((c) => (
-              <button key={c} className="chip" onClick={() => send(c)}>
-                {c}
-              </button>
-            ))}
-          </div>
-        )}
         {msgs.map((m, i) => (
           <div key={i} className={`bubble${m.role === 'user' ? ' user' : ''}${m.err ? ' err' : ''}`}>
+            {m.sample && <span className="sample-tag">샘플 답변 · AI 미사용</span>}
             {m.content}
           </div>
         ))}
@@ -94,6 +98,15 @@ export default function Chat({ open, onClose, products, contextId, setContextId,
           <div className="bubble">
             <span className="spinner" />
             {product?.source === 'dart' ? '공시 원문을 찾아보는 중이에요…' : '답변을 준비하는 중이에요…'}
+          </div>
+        )}
+        {!busy && (
+          <div className="chips">
+            {PRESET_QUESTIONS.map((c) => (
+              <button key={c} className="chip" onClick={() => sendPreset(c)}>
+                {c}
+              </button>
+            ))}
           </div>
         )}
       </div>
