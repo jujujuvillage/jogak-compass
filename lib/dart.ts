@@ -49,7 +49,9 @@ interface ListItem {
 
 async function listJson(params: Record<string, string>): Promise<{ items: ListItem[]; totalPage: number }> {
   const qs = new URLSearchParams({ crtfc_key: key(), page_count: '100', ...params });
-  const res = await fetch(`${BASE}/list.json?${qs}`, { cache: 'no-store' });
+  const res = await fetch(`${BASE}/list.json?${qs}`, { cache: 'no-store', signal: AbortSignal.timeout(12000) }).catch((e) => {
+    throw new DartError(`DART 응답이 늦어요 (${(e as Error).name})`, 504);
+  });
   if (!res.ok) throw new DartError(`DART 응답 오류 (${res.status})`);
   const j = (await res.json()) as { status: string; message: string; list?: ListItem[]; total_page?: number };
   if (j.status === '013') return { items: [], totalPage: 0 };
@@ -78,7 +80,7 @@ let corpMem: { at: number; list: Corp[] } | null = null;
 
 export async function corpList(): Promise<Corp[]> {
   if (corpMem && Date.now() - corpMem.at < 24 * 3600 * 1000) return corpMem.list;
-  const res = await fetch(`${BASE}/corpCode.xml?crtfc_key=${key()}`, { cache: 'no-store' });
+  const res = await fetch(`${BASE}/corpCode.xml?crtfc_key=${key()}`, { cache: 'no-store', signal: AbortSignal.timeout(25000) });
   if (!res.ok) throw new DartError(`DART 회사 목록 응답 오류 (${res.status})`);
   const buf = new Uint8Array(await res.arrayBuffer());
   if (buf[0] !== 0x50 || buf[1] !== 0x4b) {
@@ -124,18 +126,24 @@ async function filingsForCorp(corpCode: string, bgnDe = '20230101'): Promise<Fil
   return out;
 }
 
-/** 최근 3개월 발행공시 전체를 훑어 '투자계약'이 들어간 보고서를 찾는다(신규 발행사 발견용). */
-async function scanRecent(): Promise<Filing[]> {
+/** 최근 3개월 발행공시 전체를 훑어 '투자계약'이 들어간 보고서를 찾는다(신규 발행사 발견용). 페이지는 병렬로. */
+async function scanRecent(deadline: number): Promise<Filing[]> {
   const end = new Date();
   const bgn = new Date(end.getTime() - 89 * 24 * 3600 * 1000);
-  const out: Filing[] = [];
-  for (let page = 1; page <= 40; page++) {
-    const { items, totalPage } = await listJson({ bgn_de: ymd(bgn), end_de: ymd(end), pblntf_ty: 'C', page_no: String(page) });
-    out.push(...items.filter((x) => IC_RE.test(x.report_nm)).map(toFiling));
-    if (page >= totalPage) break;
+  const base = { bgn_de: ymd(bgn), end_de: ymd(end), pblntf_ty: 'C' };
+  const pick = (items: ListItem[]) => items.filter((x) => IC_RE.test(x.report_nm)).map(toFiling);
+  const first = await listJson({ ...base, page_no: '1' });
+  const out = pick(first.items);
+  const pages = Array.from({ length: Math.min(first.totalPage, 40) - 1 }, (_, i) => i + 2);
+  for (let i = 0; i < pages.length && Date.now() < deadline; i += 8) {
+    const batch = await Promise.allSettled(pages.slice(i, i + 8).map((pg) => listJson({ ...base, page_no: String(pg) })));
+    for (const r of batch) if (r.status === 'fulfilled') out.push(...pick(r.value.items));
   }
   return out;
 }
+
+const withDeadline = <T,>(p: Promise<T>, ms: number, fallback: T): Promise<T> =>
+  Promise.race([p, new Promise<T>((resolve) => setTimeout(() => resolve(fallback), Math.max(0, ms)))]);
 
 function dedupeSort(list: Filing[]): Filing[] {
   const map = new Map<string, Filing>();
@@ -144,20 +152,38 @@ function dedupeSort(list: Filing[]): Filing[] {
 }
 
 export async function investmentContractFilings(): Promise<Filing[]> {
-  const cacheKey = 'filings:ic:v1';
+  const cacheKey = 'filings:ic:v2';
   const cached = await cacheGet<Filing[]>(cacheKey);
   if (cached) return cached;
-  const corps = await corpList();
-  const known = KNOWN_ISSUERS.map((n) => corps.find((c) => c.name === n)).filter(Boolean) as Corp[];
-  const results = await Promise.allSettled([...known.map((c) => filingsForCorp(c.code)), scanRecent()]);
-  const all: Filing[] = [];
-  for (const r of results) if (r.status === 'fulfilled') all.push(...r.value);
-  if (!all.length && results.every((r) => r.status === 'rejected')) {
-    throw (results[0] as PromiseRejectedResult).reason;
-  }
-  const filtered = dedupeSort(all.filter((f) => IC_RE.test(f.reportName) || (OFFERING_RE.test(f.reportName) && known.some((k) => k.code === f.corpCode))));
-  await cacheSet(cacheKey, filtered, 6 * 3600);
-  return filtered;
+  const started = Date.now();
+  const deadline = started + 40000; // Vercel 함수 제한(60초) 안에서 끝내기
+  const errors: unknown[] = [];
+
+  const knownJob = (async () => {
+    const corps = await corpList();
+    const known = KNOWN_ISSUERS.map((n) => corps.find((c) => c.name === n)).filter(Boolean) as Corp[];
+    const lists = await Promise.allSettled(known.map((c) => filingsForCorp(c.code)));
+    const out: Filing[] = [];
+    for (const r of lists) {
+      if (r.status === 'fulfilled') out.push(...r.value.filter((f) => IC_RE.test(f.reportName) || OFFERING_RE.test(f.reportName)));
+      else errors.push(r.reason);
+    }
+    return out;
+  })().catch((e) => {
+    errors.push(e);
+    return [] as Filing[];
+  });
+  const scanJob = scanRecent(deadline - 3000).catch((e) => {
+    errors.push(e);
+    return [] as Filing[];
+  });
+
+  const [a, b] = await Promise.all([withDeadline(knownJob, deadline - Date.now(), []), withDeadline(scanJob, deadline - Date.now(), [])]);
+  const all = dedupeSort([...a, ...b]);
+  if (!all.length && errors.length) throw errors[0];
+  console.log('ic filings', all.length, 'in', Date.now() - started, 'ms');
+  if (all.length) await cacheSet(cacheKey, all, 6 * 3600);
+  return all;
 }
 
 export async function filingsByCompanyName(q: string): Promise<{ corps: Corp[]; filings: Filing[] }> {
