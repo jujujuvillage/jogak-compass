@@ -1,0 +1,30 @@
+{
+  "name": "jogak-compass",
+  "version": "1.0.0",
+  "private": true,
+  "description": "조각나침반 — 조각투자(투자계약증권) 증권신고서를 읽고 같은 기준으로 비교해 주는 AI 에이전트",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "test": "vitest run"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@upstash/redis": "^1.41.0",
+    "fflate": "^0.8.3",
+    "iconv-lite": "^0.7.3",
+    "next": "^16.4.6",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "typescript": "^5.6.0",
+    "vitest": "^5.1.0"
+  }
+}
