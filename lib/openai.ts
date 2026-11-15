@@ -31,7 +31,15 @@ async function call(body: Record<string, unknown>): Promise<string> {
   if (!res.ok) {
     const text = await res.text();
     console.error('openai error', res.status, text.slice(0, 500));
-    if (res.status === 401) throw new LlmError('OpenAI 키가 올바르지 않아요.', 500);
+    let code = '';
+    try {
+      const e = (JSON.parse(text) as { error?: { code?: string; type?: string } }).error;
+      code = [e?.code, e?.type].filter(Boolean).join('/');
+    } catch {
+      /* 무시 */
+    }
+    if (res.status === 401) throw new LlmError(`OpenAI 키가 올바르지 않아요.${code ? ` (OpenAI: ${code})` : ''}`, 500);
+    if (res.status === 403) throw new LlmError(`OpenAI 키에 이 모델 사용 권한이 없어요.${code ? ` (OpenAI: ${code})` : ''}`, 500);
     if (res.status === 429) throw new LlmError('AI 사용량 한도에 걸렸어요. 잠시 후 다시 시도해 주세요.', 429);
     if (res.status === 404 || /model/i.test(text)) throw new LlmError(`AI 모델(${m})을 쓸 수 없어요. OPENAI_MODEL 설정을 확인해 주세요.`, 500);
     throw new LlmError(`AI 응답 오류 (${res.status})`);
